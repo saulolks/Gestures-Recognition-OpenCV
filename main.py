@@ -13,26 +13,32 @@ import camera_module as cm
 #
 # # Close device
 # video_capture.release()
+def camera_module(image):
+    img_ycrcb = cv2.cvtColor(image, cv2.COLOR_BGR2YCrCb)
+    shape = (len(image), len(image[0]))
+
+    print(len(image), len(image[0]))
+    # -------------------- background substraction -----------------------
+
+    fgbg = cv2.createBackgroundSubtractorMOG2()
+    fgbmask = fgbg.apply(img_ycrcb)
+
+    # ------------------- splitting into 3 channels ----------------------
+
+    y, cr, cb = cv2.split(img_ycrcb)
+
+    # ------------------------- binarization -----------------------------
+    y = cv2.adaptiveThreshold(y, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 12)
+    cr = cv2.adaptiveThreshold(cr, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 12)
+    cb = cv2.adaptiveThreshold(cb, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 12)
+
+    # ---------------------------  merge ---------------------------------
+    img = cv2.merge([y, cr, cb])
+
+    cv2.imshow("", img)
+    cv2.waitKey()
+    cv2.destroyAllWindows()
+
 
 image = cv2.imread("lenna.png", cv2.IMREAD_COLOR)
-img_result = cv2.cvtColor(image, cv2.COLOR_BGR2YCrCb)
-shape = (len(image), len(image[0]))
-
-print(len(image), len(image[0]))
-
-y, cr, cb = cm.split_channels(img_result)
-
-
-print(len(y), len(y[0]))
-print(len(cr), len(cr[0]))
-print(len(cb), len(cb[0]))
-
-y = cm.binarization(y)
-cr = cm.binarization(cr)
-cb = cm.binarization(cb)
-
-img = cm.add(y, cr, cb)
-
-cv2.imshow("", img)
-cv2.waitKey()
-cv2.destroyAllWindows()
+camera_module(image)
