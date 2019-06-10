@@ -1,6 +1,12 @@
+import pickle
+from glob import glob
+from skimage.feature import hog
 import cv2
 import imutils
 import numpy as np
+import os.path
+from scipy.spatial import distance
+
 
 shape = None
 back_photos = []
@@ -12,7 +18,40 @@ font = cv2.FONT_HERSHEY_SIMPLEX
 fontScale = 1
 fontColor = (0, 255, 0)
 lineType = 4
-hand_image = np.zeros((400, 400))
+hand_image = np.zeros((80, 80), np.uint8)
+data = None
+# hog = cv2.HOGDescriptor((80, 80), (16, 16), (8, 8), (8, 8), 9, 1, 4, 0, 0.2, 0, 64)
+
+
+def preprocessing():
+    data = []
+    for file in glob('./images/**'):
+        file_string = str(file)
+        label = ""
+        print(file_string)
+
+        for i in range(9, len(file_string)):
+            if file_string[i].isnumeric():
+                label = file_string[9:i]
+                break
+        image = cv2.imread(file_string)
+        image = imutils.resize(image, 300)
+        binary = camera_module(image)
+        back = np.zeros((80, 80), np.uint8)
+        hand = cv2.resize(binary, (80, 80), interpolation=cv2.INTER_NEAREST)
+        back[:hand.shape[0], :hand.shape[1]] = hand
+        features = get_feature_vector(back)
+        data.append((label, features))
+        print(1)
+
+    with open('images/test_features', 'wb') as fp:
+        pickle.dump(data, fp)
+
+
+def get_feature_vector(img):
+    result = hog(img, orientations=8, pixels_per_cell=(8, 8), cells_per_block=(10, 10),
+                 feature_vector=True)
+    return result
 
 
 def nothing(pos):
@@ -33,6 +72,7 @@ def get_background(img, num_frames=20):
 
 
 def remove_concomponent(img, min_value):
+    shape = (len(img), len(img[0]))
     img2 = np.zeros(shape)
 
     nb_components, output, stats, _ = cv2.connectedComponentsWithStats(img, connectivity=8)
@@ -62,7 +102,7 @@ def take_a_pic():
         break
 
 
-def camera_module(original, background):
+def camera_module(original):
     ymin = cv2.getTrackbarPos('Ymin', 'YRB_calib')
     ymax = cv2.getTrackbarPos('Ymax', 'YRB_calib')
     crmin = cv2.getTrackbarPos('CRmin', 'YRB_calib')
@@ -111,7 +151,7 @@ def camera_module(original, background):
     img = remove_concomponent(img=img, min_value=min_value)
 
     # ------------------------- removing face ---------------------------
-    marge = 10
+    marge = 30
     for (x, y, w, h) in faces:
         cv2.rectangle(img, (x - marge, y - h + marge), (x + marge + w, y + marge + h), (0, 0, 0), -1)
 
@@ -127,7 +167,7 @@ def camera_module(original, background):
 def detection_module(original, binary):
     hand_only = None
     binary_aux = binary
-    aux = np.array(shape)
+    position = None
 
     contours, _ = cv2.findContours(binary, 1, 2)
 
@@ -145,6 +185,7 @@ def detection_module(original, binary):
         hull = cv2.convexHull(approx)
         M = cv2.moments(approx)
         x, y, w, h = cv2.boundingRect(hull)
+        position = (x, y, w, h)
 
         if M["m00"] != 0:
             cX = int(M["m10"] / M["m00"])
@@ -155,46 +196,74 @@ def detection_module(original, binary):
 
         cv2.rectangle(original, (x, y), (x + w, y + h), (255, 0, 0), 2)
         hand_only = binary_aux[y:y + h, x:x + w]
-        cv2.putText(original, 'mao detectada', (approx[0][0][0], approx[0][0][1] + 10), font, fontScale, fontColor,
-                    lineType)
+        # cv2.putText(original, 'mao detectada', (approx[0][0][0], approx[0][0][1] + 10), font, fontScale, fontColor,
+        #             lineType)
         cv2.drawContours(original, [approx], -1, (0, 255, 0), 2)
         cv2.drawContours(original, [hull], -1, (0, 0, 255), 2)
 
-    return binary_aux, hand_only
+    return binary_aux, hand_only, position
 
 
-take_a_pic()
+def classification_module(frame, hand_image, position):
+    feature = get_feature_vector(hand_image)
 
-# cap = cv2.VideoCapture('./videos/libras.mp4')
-cap = cv2.VideoCapture(0)
-ret = True
+    label = ""
+    minim = np.inf
 
-cv2.namedWindow('YRB_calib')
-cv2.createTrackbar('Ymin', 'YRB_calib', 54, 255, nothing)
-cv2.createTrackbar('Ymax', 'YRB_calib', 137, 255, nothing)
-cv2.createTrackbar('CRmin', 'YRB_calib', 135, 255, nothing)
-cv2.createTrackbar('CRmax', 'YRB_calib', 174, 255, nothing)
-cv2.createTrackbar('CBmin', 'YRB_calib', 0, 255, nothing)
-cv2.createTrackbar('CBmax', 'YRB_calib', 125, 255, nothing)
-cv2.namedWindow('Windows sizes')
-cv2.createTrackbar('OpenSize', 'Windows sizes', 3, 10, nothing)
-cv2.createTrackbar('Gaussian', 'Windows sizes', 5, 30, nothing)
-cv2.createTrackbar('Connected', 'Windows sizes', 150, 500, nothing)
+    for item in data:
+        dist = distance.euclidean(feature, item[1])
+        if dist < minim:
+            minim = dist
+            label = item[0]
+    if position is not None:
+        cv2.putText(frame, label, (position[0], position[1] + 10), font, fontScale, fontColor,
+                lineType)
 
-while ret:
-    ret, frame = cap.read()
 
-    frame = imutils.resize(frame, 600)
-    shape = (len(frame), len(frame[0]))
+def main():
+    # cap = cv2.VideoCapture('./videos/libras.mp4')
+    cap = cv2.VideoCapture(0)
+    ret = True
 
-    bin_image = camera_module(frame, background)
-    detect, hand = detection_module(frame, bin_image)
+    cv2.namedWindow('YRB_calib')
+    cv2.createTrackbar('Ymin', 'YRB_calib', 54, 255, nothing)
+    cv2.createTrackbar('Ymax', 'YRB_calib', 137, 255, nothing)
+    cv2.createTrackbar('CRmin', 'YRB_calib', 135, 255, nothing)
+    cv2.createTrackbar('CRmax', 'YRB_calib', 174, 255, nothing)
+    cv2.createTrackbar('CBmin', 'YRB_calib', 0, 255, nothing)
+    cv2.createTrackbar('CBmax', 'YRB_calib', 125, 255, nothing)
+    cv2.namedWindow('Windows sizes')
+    cv2.createTrackbar('OpenSize', 'Windows sizes', 3, 10, nothing)
+    cv2.createTrackbar('Gaussian', 'Windows sizes', 5, 30, nothing)
+    cv2.createTrackbar('Connected', 'Windows sizes', 150, 500, nothing)
 
-    if hand is not None:
-        hand = cv2.resize(hand, (400, 400), interpolation=cv2.INTER_NEAREST)
-        hand_image[:hand.shape[0], :hand.shape[1]] = hand
+    if not os.path.exists('images/test_features'):
+        preprocessing()
 
-    cv2.imshow("detection", detect)
-    cv2.imshow("original", frame)
-    cv2.imshow("hand", hand_image)
-    cv2.waitKey(1)
+    with open('images/test_features', 'rb') as fp:
+        global data
+        data = pickle.load(fp)
+
+    while ret:
+        ret, frame = cap.read()
+
+        frame = imutils.resize(frame, 600)
+        shape = (len(frame), len(frame[0]))
+
+        bin_image = camera_module(frame)
+        detect, hand, position = detection_module(frame, bin_image)
+
+        if hand is not None:
+            hand = cv2.resize(hand, (80, 80), interpolation=cv2.INTER_NEAREST)
+            hand_image[:hand.shape[0], :hand.shape[1]] = hand
+
+        classification_module(frame, hand_image, position)
+
+        cv2.imshow("detection", detect)
+        cv2.imshow("original", frame)
+        cv2.imshow("hand", hand_image)
+        cv2.waitKey(1)
+
+
+if __name__ == '__main__':
+    main()
