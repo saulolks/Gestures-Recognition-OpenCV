@@ -7,11 +7,12 @@ back_photos = []
 background = None
 handcascade = cv2.CascadeClassifier('./haarcascades/palm_v4.xml')
 headcascade = cv2.CascadeClassifier('./haarcascades/face.xml')
-backSub = cv2.createBackgroundSubtractorKNN(history=500, dist2Threshold=12)
+backSub = cv2.createBackgroundSubtractorKNN(history=500, dist2Threshold=30)
 font = cv2.FONT_HERSHEY_SIMPLEX
 fontScale = 1
 fontColor = (0, 255, 0)
 lineType = 4
+hand_image = np.zeros((400, 400))
 
 
 def nothing(pos):
@@ -70,6 +71,7 @@ def camera_module(original, background):
     cbmax = cv2.getTrackbarPos('CBmax', 'YRB_calib')
     wsize_open = cv2.getTrackbarPos('OpenSize', 'Windows sizes')
     wsize_gaussian = cv2.getTrackbarPos('Gaussian', 'Windows sizes') + 1
+    wsize_gaussian = wsize_gaussian if wsize_gaussian % 2 == 1 else wsize_gaussian + 1
     min_value = cv2.getTrackbarPos('Connected', 'Windows sizes')
 
     kernel = np.ones((wsize_open, wsize_open), np.uint8)
@@ -105,28 +107,25 @@ def camera_module(original, background):
 
     mask = backSub.apply(image)
     img = cv2.bitwise_and(mask, img)
-
-    kernel_gaussian = np.ones((wsize_gaussian, wsize_gaussian), np.float32) / (wsize_gaussian * wsize_gaussian)
-    # img = cv2.filter2D(img, -1, kernel_gaussian)
-    img = cv2.medianBlur(img, 7)
+    img = cv2.medianBlur(img, wsize_gaussian)
     img = remove_concomponent(img=img, min_value=min_value)
-
 
     # ------------------------- removing face ---------------------------
     marge = 10
     for (x, y, w, h) in faces:
-        cv2.rectangle(img, (x- marge, y - h + marge), (x + marge + w, y + marge + h), (0, 0, 0), -1)
+        cv2.rectangle(img, (x - marge, y - h + marge), (x + marge + w, y + marge + h), (0, 0, 0), -1)
 
     # -------------------------- detect hands ---------------------------
-    hands = handcascade.detectMultiScale(img, 1.1, 1)
-    for (x, y, w, h) in hands:
-        # cv2.rectangle(img, (x, y), (x + w, y + h), (255, 0, 0), 2)
-        cv2.rectangle(original, (x, y), (x + w, y + h), (255, 0, 0), 2)
+    # hands = handcascade.detectMultiScale(img, 1.1, 1)
+    # for (x, y, w, h) in hands:
+    #     # cv2.rectangle(img, (x, y), (x + w, y + h), (255, 0, 0), 2)
+    #     cv2.rectangle(original, (x, y), (x + w, y + h), (255, 0, 0), 2)
 
     return img
 
 
 def detection_module(original, binary):
+    hand_only = None
     binary_aux = binary
     aux = np.array(shape)
 
@@ -143,13 +142,25 @@ def detection_module(original, binary):
 
         epsilon = 0.01 * cv2.arcLength(cnt, True)
         approx = cv2.approxPolyDP(cnt, epsilon, True)
-        cv2.putText(original, 'mao detectada', (approx[0][0][0], approx[0][0][1] + 10), font, fontScale, fontColor, lineType)
+        hull = cv2.convexHull(approx)
+        M = cv2.moments(approx)
+        x, y, w, h = cv2.boundingRect(hull)
 
+        if M["m00"] != 0:
+            cX = int(M["m10"] / M["m00"])
+            cY = int(M["m01"] / M["m00"])
+
+            cv2.circle(original, (cX, cY), 5, (255, 255, 255), -1)
+            cv2.putText(original, "centroid", (cX - 25, cY - 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+
+        cv2.rectangle(original, (x, y), (x + w, y + h), (255, 0, 0), 2)
+        hand_only = binary_aux[y:y + h, x:x + w]
+        cv2.putText(original, 'mao detectada', (approx[0][0][0], approx[0][0][1] + 10), font, fontScale, fontColor,
+                    lineType)
         cv2.drawContours(original, [approx], -1, (0, 255, 0), 2)
+        cv2.drawContours(original, [hull], -1, (0, 0, 255), 2)
 
-
-
-    return binary_aux
+    return binary_aux, hand_only
 
 
 take_a_pic()
@@ -167,7 +178,7 @@ cv2.createTrackbar('CBmin', 'YRB_calib', 0, 255, nothing)
 cv2.createTrackbar('CBmax', 'YRB_calib', 125, 255, nothing)
 cv2.namedWindow('Windows sizes')
 cv2.createTrackbar('OpenSize', 'Windows sizes', 3, 10, nothing)
-cv2.createTrackbar('Gaussian', 'Windows sizes', 15, 30, nothing)
+cv2.createTrackbar('Gaussian', 'Windows sizes', 5, 30, nothing)
 cv2.createTrackbar('Connected', 'Windows sizes', 150, 500, nothing)
 
 while ret:
@@ -177,9 +188,13 @@ while ret:
     shape = (len(frame), len(frame[0]))
 
     bin_image = camera_module(frame, background)
-    detect = detection_module(frame, bin_image)
+    detect, hand = detection_module(frame, bin_image)
 
-    cv2.imshow("binary", bin_image)
-    cv2.imshow("original", frame)
+    if hand is not None:
+        hand = cv2.resize(hand, (400, 400), interpolation=cv2.INTER_NEAREST)
+        hand_image[:hand.shape[0], :hand.shape[1]] = hand
+
     cv2.imshow("detection", detect)
+    cv2.imshow("original", frame)
+    cv2.imshow("hand", hand_image)
     cv2.waitKey(1)
