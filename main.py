@@ -20,7 +20,6 @@ fontColor = (0, 255, 0)
 lineType = 4
 hand_image = np.zeros((80, 80), np.uint8)
 data = None
-# hog = cv2.HOGDescriptor((80, 80), (16, 16), (8, 8), (8, 8), 9, 1, 4, 0, 0.2, 0, 64)
 
 
 def preprocessing():
@@ -37,9 +36,12 @@ def preprocessing():
         image = cv2.imread(file_string)
         image = imutils.resize(image, 300)
         binary = camera_module(image)
+        _, hand, _ = detection_module(image, binary)
         back = np.zeros((80, 80), np.uint8)
-        hand = cv2.resize(binary, (80, 80), interpolation=cv2.INTER_NEAREST)
+        hand = cv2.resize(hand, (80, 80), interpolation=cv2.INTER_NEAREST)
         back[:hand.shape[0], :hand.shape[1]] = hand
+        cv2.imshow("", back)
+        cv2.waitKey()
         features = get_feature_vector(back)
         data.append((label, features))
         print(1)
@@ -192,7 +194,7 @@ def detection_module(original, binary):
             cY = int(M["m01"] / M["m00"])
 
             cv2.circle(original, (cX, cY), 5, (255, 255, 255), -1)
-            cv2.putText(original, "centroid", (cX - 25, cY - 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+            # cv2.putText(original, "centroid", (cX - 25, cY - 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
 
         cv2.rectangle(original, (x, y), (x + w, y + h), (255, 0, 0), 2)
         hand_only = binary_aux[y:y + h, x:x + w]
@@ -215,7 +217,8 @@ def classification_module(frame, hand_image, position):
         if dist < minim:
             minim = dist
             label = item[0]
-    if position is not None:
+    if position is not None and minim < 1.2:
+        print("distance: ", minim)
         cv2.putText(frame, label, (position[0], position[1] + 10), font, fontScale, fontColor,
                 lineType)
 
