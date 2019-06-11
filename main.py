@@ -218,7 +218,7 @@ def classification_module(frame, hand_image, position):
         if dist < minim:
             minim = dist
             label = item[0]
-    if position is not None and minim < 1.2:
+    if position is not None and minim < 1.1:
         print("distance: ", minim)
         cv2.putText(frame, str(label), (position[0], position[1] + 10), font, fontScale, fontColor, lineType)
 
